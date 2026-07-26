@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# PyInstaller / Build
+build/
+dist/
+*.spec
+*.exe
+
+# IDE / System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# App Data Session
+assets/session_history.json
+color_history.csv
