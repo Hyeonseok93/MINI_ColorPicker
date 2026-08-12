@@ -38,6 +38,16 @@ class App(QtWidgets.QApplication):
         if icon_path:
             self.setWindowIcon(self.icon)
 
+        # ---- Font Database Loading (Pretendard) ----
+        for font_name in ("Pretendard-Medium.ttf", "Pretendard-Bold.ttf"):
+            font_path = resource_path(os.path.join("assets", "fonts", font_name))
+            if os.path.exists(font_path):
+                QtGui.QFontDatabase.addApplicationFont(font_path)
+
+        app_font = QtGui.QFont("Pretendard", 10)
+        app_font.setStyleHint(QtGui.QFont.SansSerif)
+        self.setFont(app_font)
+
         # ---- Instantiate Main Window ----
         self.win = MainWindow()
         self.win.closeEvent = self.on_win_close
