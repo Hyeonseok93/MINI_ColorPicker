@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 from datetime import datetime
-from typing import Tuple, Optional, List, Dict, Any
+from typing import Tuple, Optional, List
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -90,23 +90,24 @@ class PixelMagnifier(QtWidgets.QFrame):
         """)
 
         self.grid_size = 21
-        self.zoom_factor = 8
         self.show_grid = True
 
         self.crop_image: Optional[QtGui.QImage] = None
-        self.center_rgb = (0, 0, 0)
 
     def update_magnifier(self, center_x: int, center_y: int):
-        screen = QtWidgets.QApplication.screenAt(QtCore.QPoint(center_x, center_y)) or QtWidgets.QApplication.primaryScreen()
-        if not screen:
+        # Use Win32 virtual-desktop capture (same coords as GetPixel) so any
+        # monitor layout works. Qt grabWindow expects screen-local coords and
+        # goes black on non-primary displays.
+        half = self.grid_size // 2
+        w = h = self.grid_size
+        raw = Core.capture_screen_region(center_x - half, center_y - half, w, h)
+        if not raw:
+            self.crop_image = None
+            self.update()
             return
 
-        half = self.grid_size // 2
-        grab_rect = QtCore.QRect(center_x - half, center_y - half, self.grid_size, self.grid_size)
-        pixmap = screen.grabWindow(0, grab_rect.x(), grab_rect.y(), grab_rect.width(), grab_rect.height())
-        self.crop_image = pixmap.toImage()
-
-        self.center_rgb = Core.get_pixel_color_at(center_x, center_y)
+        img = QtGui.QImage(raw, w, h, w * 4, QtGui.QImage.Format.Format_RGB32)
+        self.crop_image = img.copy()  # detach from temporary buffer
         self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent):
@@ -680,9 +681,7 @@ class MainWindow(QtWidgets.QWidget):
         root.addWidget(self.list, 1)
 
         # Color States
-        self.live_rgb = (0, 0, 0)
         self.live_hex = "#000000"
-        self.captured_rgb = (0, 0, 0)
         self.captured_hex = "#000000"
 
         # Live Update Timer
@@ -693,10 +692,6 @@ class MainWindow(QtWidgets.QWidget):
 
         self.color_captured.connect(self.add_history_item)
         self.load_session_history()
-
-    def _capture_current_live_color(self):
-        r, g, b = self.live_rgb
-        self.emit_color(r, g, b, self.live_hex)
 
     def show_help_dialog(self):
         dlg = HelpDialog(self)
@@ -732,7 +727,6 @@ class MainWindow(QtWidgets.QWidget):
     def update_live_preview(self):
         x, y = Core.get_cursor_pos_native()
         r, g, b = Core.get_pixel_color_at(x, y)
-        self.live_rgb = (r, g, b)
         self.live_hex = Core.rgb_to_hex(r, g, b)
         self.magnifier.update_magnifier(x, y)
 
@@ -755,7 +749,6 @@ class MainWindow(QtWidgets.QWidget):
 
     # ---- 가장 최근 캡쳐 / 선택된 색상 포맷 카드 세팅 ----
     def set_captured_color(self, rgb: Tuple[int, int, int], hexstr: str):
-        self.captured_rgb = rgb
         self.captured_hex = hexstr
         r, g, b = rgb
 
@@ -868,9 +861,3 @@ class MainWindow(QtWidgets.QWidget):
                 elif hasattr(self, "show_toast"):
                     self.show_toast("시스템 트레이로 최소화되었습니다.")
         super().changeEvent(event)
-
-    def closeEvent(self, event: QtGui.QCloseEvent):
-        event.accept()
-        app = QtWidgets.QApplication.instance()
-        if app and hasattr(app, "quit"):
-            app.quit()

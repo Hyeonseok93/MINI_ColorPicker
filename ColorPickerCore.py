@@ -5,7 +5,7 @@ from ctypes import wintypes
 import colorsys
 import json
 import os
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 
 _single_instance_mutex = None
 
@@ -35,6 +35,25 @@ class RECT(ctypes.Structure):
 class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
+class BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [
+        ("biSize", wintypes.DWORD),
+        ("biWidth", wintypes.LONG),
+        ("biHeight", wintypes.LONG),
+        ("biPlanes", wintypes.WORD),
+        ("biBitCount", wintypes.WORD),
+        ("biCompression", wintypes.DWORD),
+        ("biSizeImage", wintypes.DWORD),
+        ("biXPelsPerMeter", wintypes.LONG),
+        ("biYPelsPerMeter", wintypes.LONG),
+        ("biClrUsed", wintypes.DWORD),
+        ("biClrImportant", wintypes.DWORD),
+    ]
+
+SRCCOPY = 0x00CC0020
+BI_RGB = 0
+DIB_RGB_COLORS = 0
+
 def get_cursor_pos_native() -> Tuple[int, int]:
     """Get global cursor position (X, Y)."""
     pt = POINT()
@@ -53,6 +72,54 @@ def get_pixel_color_at(x: int, y: int) -> Tuple[int, int, int]:
     b = (pixel >> 16) & 0xFF
     return r, g, b
 
+def capture_screen_region(x: int, y: int, width: int, height: int) -> Optional[bytes]:
+    """Capture a w×h region from the virtual desktop (same coords as GetCursorPos/GetPixel).
+
+    Returns top-down BGRA bytes (width * height * 4), or None on failure.
+    Works across any multi-monitor layout.
+    """
+    if width <= 0 or height <= 0:
+        return None
+
+    hdc = user32.GetDC(0)
+    if not hdc:
+        return None
+
+    memdc = gdi32.CreateCompatibleDC(hdc)
+    hbmp = gdi32.CreateCompatibleBitmap(hdc, width, height) if memdc else None
+    if not memdc or not hbmp:
+        if hbmp:
+            gdi32.DeleteObject(hbmp)
+        if memdc:
+            gdi32.DeleteDC(memdc)
+        user32.ReleaseDC(0, hdc)
+        return None
+
+    old = gdi32.SelectObject(memdc, hbmp)
+    ok = gdi32.BitBlt(memdc, 0, 0, width, height, hdc, x, y, SRCCOPY)
+
+    buf: Optional[bytes] = None
+    if ok:
+        bmi = BITMAPINFOHEADER()
+        bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.biWidth = width
+        bmi.biHeight = -height  # top-down
+        bmi.biPlanes = 1
+        bmi.biBitCount = 32
+        bmi.biCompression = BI_RGB
+
+        buf_size = width * height * 4
+        raw = (ctypes.c_char * buf_size)()
+        got = gdi32.GetDIBits(memdc, hbmp, 0, height, raw, ctypes.byref(bmi), DIB_RGB_COLORS)
+        if got:
+            buf = bytes(raw)
+
+    gdi32.SelectObject(memdc, old)
+    gdi32.DeleteObject(hbmp)
+    gdi32.DeleteDC(memdc)
+    user32.ReleaseDC(0, hdc)
+    return buf
+
 def get_window_rect_native(hwnd: int) -> RECT:
     rc = RECT()
     user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rc))
@@ -62,26 +129,12 @@ def get_window_rect_native(hwnd: int) -> RECT:
 VK_CONTROL = 0x11
 VK_LCONTROL = 0xA2
 VK_RCONTROL = 0xA3
-VK_SHIFT   = 0x10
-VK_MENU    = 0x12  # Alt key
 
 def is_ctrl_pressed() -> bool:
     try:
         return bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000) or \
                bool(user32.GetAsyncKeyState(VK_LCONTROL) & 0x8000) or \
                bool(user32.GetAsyncKeyState(VK_RCONTROL) & 0x8000)
-    except Exception:
-        return False
-
-def is_shift_pressed() -> bool:
-    try:
-        return bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
-    except Exception:
-        return False
-
-def is_alt_pressed() -> bool:
-    try:
-        return bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000)
     except Exception:
         return False
 
@@ -93,11 +146,6 @@ def rgb_to_hsl(r: int, g: int, b: int) -> Tuple[int, int, int]:
     r_n, g_n, b_n = r / 255.0, g / 255.0, b / 255.0
     h, l, s = colorsys.rgb_to_hls(r_n, g_n, b_n)
     return round(h * 360), round(s * 100), round(l * 100)
-
-def rgb_to_hsv(r: int, g: int, b: int) -> Tuple[int, int, int]:
-    r_n, g_n, b_n = r / 255.0, g / 255.0, b / 255.0
-    h, s, v = colorsys.rgb_to_hsv(r_n, g_n, b_n)
-    return round(h * 360), round(s * 100), round(v * 100)
 
 def rgb_to_cmyk(r: int, g: int, b: int) -> Tuple[int, int, int, int]:
     if (r, g, b) == (0, 0, 0):
@@ -126,36 +174,6 @@ def get_analogous_colors(r: int, g: int, b: int) -> List[Tuple[int, int, int]]:
     c1 = hsl_to_rgb(h - 30, s, l)
     c2 = hsl_to_rgb(h + 30, s, l)
     return [c1, c2]
-
-def get_triadic_colors(r: int, g: int, b: int) -> List[Tuple[int, int, int]]:
-    h, s, l = rgb_to_hsl(r, g, b)
-    c1 = hsl_to_rgb(h + 120, s, l)
-    c2 = hsl_to_rgb(h + 240, s, l)
-    return [c1, c2]
-
-# ---- Approximate Color Naming ----
-COLOR_NAMES = {
-    "#000000": "Black", "#FFFFFF": "White", "#FF0000": "Red", "#00FF00": "Lime",
-    "#0000FF": "Blue", "#FFFF00": "Yellow", "#00FFFF": "Cyan", "#FF00FF": "Magenta",
-    "#C0C0C0": "Silver", "#808080": "Gray", "#800000": "Maroon", "#808000": "Olive",
-    "#008000": "Green", "#800080": "Purple", "#008080": "Teal", "#000080": "Navy",
-    "#FF7F50": "Coral", "#FF4500": "OrangeRed", "#FF8C00": "DarkOrange", "#FFD700": "Gold",
-    "#4B0082": "Indigo", "#EE82EE": "Violet", "#F0E68C": "Khaki", "#E6E6FA": "Lavender",
-    "#1E2129": "Dark Charcoal", "#2A2E39": "Dark Slate"
-}
-
-def get_closest_color_name(r: int, g: int, b: int) -> str:
-    min_dist = float("inf")
-    closest_name = "Custom Color"
-    for hex_code, name in COLOR_NAMES.items():
-        cr = int(hex_code[1:3], 16)
-        cg = int(hex_code[3:5], 16)
-        cb = int(hex_code[5:7], 16)
-        dist = (r - cr) ** 2 + (g - cg) ** 2 + (b - cb) ** 2
-        if dist < min_dist:
-            min_dist = dist
-            closest_name = name
-    return closest_name
 
 # ---- Session Persistence Helpers ----
 SESSION_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "session_history.json")
