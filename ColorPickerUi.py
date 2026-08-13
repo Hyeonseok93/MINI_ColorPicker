@@ -707,12 +707,9 @@ class MainWindow(QtWidgets.QWidget):
 
     def apply_pin_state(self, enabled: bool):
         rect = self.geometry()
-        flags = self.windowFlags()
-        if enabled:
-            flags |= QtCore.Qt.WindowStaysOnTopHint
-        else:
-            flags &= ~QtCore.Qt.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
+        # Toggle only this bit. Rewriting all flags via setWindowFlags() can
+        # drop WindowCloseButtonHint and gray out the title-bar close button.
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, enabled)
         self.setGeometry(rect)
         self.show()
         if enabled:

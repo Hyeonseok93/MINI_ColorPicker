@@ -97,6 +97,8 @@ def capture_screen_region(x: int, y: int, width: int, height: int) -> Optional[b
 
     old = gdi32.SelectObject(memdc, hbmp)
     ok = gdi32.BitBlt(memdc, 0, 0, width, height, hdc, x, y, SRCCOPY)
+    # MSDN: bitmap must not be selected into a DC when calling GetDIBits
+    gdi32.SelectObject(memdc, old)
 
     buf: Optional[bytes] = None
     if ok:
@@ -114,7 +116,6 @@ def capture_screen_region(x: int, y: int, width: int, height: int) -> Optional[b
         if got:
             buf = bytes(raw)
 
-    gdi32.SelectObject(memdc, old)
     gdi32.DeleteObject(hbmp)
     gdi32.DeleteDC(memdc)
     user32.ReleaseDC(0, hdc)

@@ -34,7 +34,9 @@ set "ICONOPT="
 set "DATAOPT="
 if exist "%ICON%" (
   set "ICONOPT=--icon=%ICON%"
-  set "DATAOPT=--add-data=%ICON%;assets"
+)
+if exist "assets" (
+  set "DATAOPT=--add-data=assets;assets"
 )
 
 set "SPLASHOPT="
@@ -86,6 +88,7 @@ if exist "dist\%APP_NAME%.exe" (
   if exist dist rmdir /S /Q dist >nul 2>&1
   if exist build rmdir /S /Q build >nul 2>&1
   if exist %APP_NAME%.spec del /F /Q %APP_NAME%.spec >nul 2>&1
+  for /d /r %%d in (__pycache__) do @if exist "%%d" rmdir /s /q "%%d" 2>nul
 
   REM Clean isolated virtual environment after build
   call .venv\Scripts\deactivate.bat >nul 2>&1
